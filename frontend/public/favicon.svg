@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><metadata><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/"><rdf:Description><dc:creator>RealFaviconGenerator</dc:creator><dc:source>https://realfavicongenerator.net</dc:source></rdf:Description></rdf:RDF></metadata><defs>
+    <!-- Gradients -->
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#a855f7;stop-opacity:1"></stop>
+      <stop offset="50%" style="stop-color:#06b6d4;stop-opacity:1"></stop>
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1"></stop>
+    </linearGradient>
+    
+    <linearGradient id="logoGradientDark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:1"></stop>
+      <stop offset="100%" style="stop-color:#0891b2;stop-opacity:1"></stop>
+    </linearGradient>
+    
+    <!-- Glow Filter -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"></feGaussianBlur>
+      <feMerge>
+        <feMergeNode in="blur"></feMergeNode>
+        <feMergeNode in="SourceGraphic"></feMergeNode>
+      </feMerge>
+    </filter>
+  </defs><circle cx="50" cy="50" r="48" fill="none" stroke="url(#logoGradient)" stroke-width="2" opacity="0.2"></circle><circle cx="50" cy="50" r="44" fill="none" stroke="url(#logoGradient)" stroke-width="1" opacity="0.3" filter="url(#glow)"></circle><g transform="translate(50, 50)">
+    <!-- Left bracket -->
+    <path d="M-22,-28 L-28,-28 L-28,28 L-22,28" fill="none" stroke="url(#logoGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+    
+    <!-- Right bracket -->
+    <path d="M22,-28 L28,-28 L28,28 L22,28" fill="none" stroke="url(#logoGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+    
+    <!-- Lightning bolt in center -->
+    <path d="M-4,-22 L8,-4 L-2,0 L6,22 L-6,4 L4,0 L-4,-22Z" fill="url(#logoGradient)" filter="url(#glow)"></path>
+  </g><circle cx="15" cy="15" r="2" fill="#a855f7" opacity="0.6">
+    <animate attributeName="opacity" values="0.2;0.8;0.2" dur="2s" repeatCount="indefinite"></animate>
+  </circle><circle cx="85" cy="85" r="2" fill="#06b6d4" opacity="0.6">
+    <animate attributeName="opacity" values="0.8;0.2;0.8" dur="2.5s" repeatCount="indefinite"></animate>
+  </circle><circle cx="85" cy="15" r="1.5" fill="#8b5cf6" opacity="0.5">
+    <animate attributeName="opacity" values="0.3;0.9;0.3" dur="3s" repeatCount="indefinite"></animate>
+  </circle><circle cx="15" cy="85" r="1.5" fill="#0891b2" opacity="0.5">
+    <animate attributeName="opacity" values="0.9;0.3;0.9" dur="2.8s" repeatCount="indefinite"></animate>
+  </circle></svg>

@@ -1,0 +1,56 @@
+# =============================================
+# NEBULA ORION RUNNER — .gitignore
+# =============================================
+
+# ── Secrets & Environment ──────────────────
+.env
+*.env
+!.env.example
+
+# ── Python ────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ── Database ──────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Uploaded user files ───────────────────
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ── Node / React ──────────────────────────
+node_modules/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# ── Logs ──────────────────────────────────
+*.log
+logs/
+
+# ── OS & Editor ───────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Misc sensitive scripts ─────────────────
+backend/reset_admin.py
+
+# ── Old/backup folders ────────────────────
+backend-old/

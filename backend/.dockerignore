@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.py[cod]
+*.pyc
+.env
+*.db
+*.sqlite
+uploads/*
+!uploads/.gitkeep
+reset_admin.py
+tests/
+*.log

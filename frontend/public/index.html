@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0a1a" />
+    
+    <!-- Primary Meta Tags -->
+    <title>Nebula · Cloud Code Runner</title>
+    <meta name="title" content="Nebula · Cloud Code Runner" />
+    <meta name="description" content="Run Python code in the cloud with a modern, beautiful interface" />
+    <meta name="keywords" content="python, cloud, code runner, online ide, developer tools" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://nebula-runner.com/" />
+    <meta property="og:title" content="Nebula · Cloud Code Runner" />
+    <meta property="og:description" content="Run Python code in the cloud with a modern, beautiful interface" />
+    <meta property="og:image" content="%PUBLIC_URL%/og-image.png" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://nebula-runner.com/" />
+    <meta property="twitter:title" content="Nebula · Cloud Code Runner" />
+    <meta property="twitter:description" content="Run Python code in the cloud with a modern, beautiful interface" />
+    <meta property="twitter:image" content="%PUBLIC_URL%/og-image.png" />
+    
+    <!-- Preconnect to Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="%PUBLIC_URL%/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="%PUBLIC_URL%/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="%PUBLIC_URL%/favicon-16x16.png" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
+    
+    <!-- Manifest -->
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    
+    <!-- Robots -->
+    <meta name="robots" content="index, follow" />
+    
+    <title>Nebula · Cloud Code Runner</title>
+  </head>
+  <body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+      <div class="loader-container">
+        <div class="loader-logo">⚡</div>
+        <div class="loader-spinner"></div>
+        <p class="loader-text">Launching Nebula...</p>
+      </div>
+    </div>
+
+    <!-- React Root -->
+    <div id="root"></div>
+    
+    <!-- Fallback for older browsers -->
+    <noscript>
+      <div style="text-align: center; padding: 40px; color: #e2e8f0; background: #0a0a1a; min-height: 100vh; font-family: 'Inter', sans-serif;">
+        <div style="font-size: 48px; margin-bottom: 16px;">⚡</div>
+        <h1 style="font-family: 'Orbitron', sans-serif; font-size: 24px; margin-bottom: 8px;">Nebula Code Runner</h1>
+        <p style="color: #94a3b8;">Please enable JavaScript to run this application.</p>
+      </div>
+    </noscript>
+  </body>
+</html>
