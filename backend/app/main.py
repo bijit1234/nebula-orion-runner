@@ -11,6 +11,36 @@ load_dotenv()
 # Create database tables
 database.Base.metadata.create_all(bind=database.engine)
 
+def init_default_admin():
+    """
+    Seed a default admin user on first startup.
+    Only runs when the database has zero users (e.g. fresh cloud deploy).
+    Safe to call on every restart — does nothing if users already exist.
+    """
+    from .models import User
+    from .auth import get_password_hash
+
+    db = database.SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            default_username = os.getenv("ADMIN_USERNAME", "admin")
+            default_password = os.getenv("ADMIN_PASSWORD", "password123")
+            admin = User(
+                username=default_username,
+                hashed_password=get_password_hash(default_password)
+            )
+            db.add(admin)
+            db.commit()
+            print(f"[NEBULA] Default admin created → username: '{default_username}'")
+        else:
+            print("[NEBULA] Users already exist — skipping admin seed")
+    except Exception as e:
+        print(f"[NEBULA] Warning: could not seed admin user: {e}")
+    finally:
+        db.close()
+
+init_default_admin()
+
 app = FastAPI(
     title="NEBULA Code Runner API",
     description="Cloud-based Python code execution API",
