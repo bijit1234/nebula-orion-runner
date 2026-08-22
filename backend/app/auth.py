@@ -101,10 +101,27 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 
 @router.post("/register")
 async def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
+    # The username becomes a folder name in storage (and in FileCloud), so it
+    # must survive sanitising unchanged. Otherwise '../alice' and 'alice' would
+    # both resolve to the same folder and the two accounts would share files.
+    from .services.storage import StorageError, safe_user
+
+    try:
+        if safe_user(user.username) != user.username:
+            raise StorageError("bad username")
+    except StorageError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Username may only contain letters, numbers, dash, underscore "
+                "and dot, must not start with a dot, and must be 1-64 characters."
+            ),
+        )
+
     existing_user = db.query(models.User).filter(models.User.username == user.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
-    
+
     hashed_password = get_password_hash(user.password)
     db_user = models.User(
         username=user.username,
@@ -113,7 +130,16 @@ async def register(user: schemas.UserCreate, db: Session = Depends(database.get_
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    
+
+    # Pre-create the user's storage folder so it shows up in FileCloud straight
+    # away, rather than only after their first upload. Never block signup on it.
+    try:
+        from .services.storage import get_storage
+
+        get_storage().ensure_user_space(db_user.username)
+    except Exception as exc:  # noqa: BLE001 - storage must not break registration
+        print(f"[NEBULA] Could not pre-create storage for {db_user.username}: {exc}")
+
     return {"message": "User created successfully"}
 
 

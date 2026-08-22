@@ -1,8 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from . import database
 from .routers import files, execution, history
 from .auth import router as auth_router
+from .services.storage import StorageError
 import os
 from dotenv import load_dotenv
 
@@ -65,6 +67,15 @@ app.include_router(files.router)
 app.include_router(execution.router)
 app.include_router(history.router)
 
+@app.exception_handler(StorageError)
+async def storage_error_handler(request: Request, exc: StorageError):
+    """
+    Bad filenames / usernames are the client's fault, so answer 400 rather than
+    letting a StorageError escape as an opaque 500.
+    """
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
 @app.get("/")
 async def root():
     return {
@@ -76,6 +87,20 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/health/storage")
+async def storage_health():
+    """
+    Which storage backend is live, and can it actually reach FileCloud?
+
+    Hit this right after deploying. If it reports backend "local" when you set
+    STORAGE_BACKEND=filecloud, the FileCloud login failed and the app silently
+    fell back to (ephemeral) local disk — the "error" field says why.
+    """
+    from .services.storage import get_storage
+
+    return get_storage().health()
 
 if __name__ == "__main__":
     import uvicorn

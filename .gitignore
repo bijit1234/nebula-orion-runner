@@ -30,6 +30,9 @@ build/
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# ── FileCloud staging dir (downloaded copies, never source of truth) ──
+backend/workspace/
+
 # ── Node / React ──────────────────────────
 node_modules/
 frontend/build/

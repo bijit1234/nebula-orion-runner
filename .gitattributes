@@ -1,0 +1,17 @@
+# Normalise line endings so a Windows working tree doesn't show every file as
+# modified. Git stores LF; your editor still sees CRLF locally.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF or cmd.exe misbehaves.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts must be LF even on Windows, or Docker/Render can't run them.
+*.sh text eol=lf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.ico binary
+*.svg text
+*.db binary

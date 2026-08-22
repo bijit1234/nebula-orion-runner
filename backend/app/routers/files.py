@@ -1,181 +1,178 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
-from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import Response
 import os
-import shutil
-from typing import List
-from .. import database, auth
+
 from ..auth import get_current_user
 from ..models import User
+from ..services.storage import StorageError, get_storage, safe_name
 
 router = APIRouter(prefix="/api", tags=["files"])
 
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-UPLOAD_DIR_ABS = os.path.abspath(UPLOAD_DIR)
+# Max size for a source file. Keeps a stray 2GB upload from eating Render's RAM.
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(2 * 1024 * 1024)))
+
+ALLOWED_SUFFIXES = (".py",)
+ALLOWED_EXACT = ("requirements.txt",)
 
 
-def safe_file_path(filename: str) -> str:
-    """
-    Resolve `filename` inside UPLOAD_DIR and reject any path that
-    escapes it (e.g. '../../etc/passwd', absolute paths, etc).
-    """
-    # Strip any directory components the client tried to sneak in
-    # (handles both '/' and '\' separators, and leading '..').
-    safe_name = os.path.basename(filename)
-    if not safe_name or safe_name in (".", ".."):
-        raise HTTPException(status_code=400, detail="Invalid filename")
+def _check_allowed(filename: str) -> None:
+    if not (filename.endswith(ALLOWED_SUFFIXES) or filename in ALLOWED_EXACT):
+        raise HTTPException(
+            status_code=400,
+            detail="Only Python files (.py) and requirements.txt are allowed",
+        )
 
-    candidate = os.path.abspath(os.path.join(UPLOAD_DIR_ABS, safe_name))
 
-    # Belt-and-suspenders: make sure the resolved path is still inside UPLOAD_DIR
-    if os.path.commonpath([candidate, UPLOAD_DIR_ABS]) != UPLOAD_DIR_ABS:
-        raise HTTPException(status_code=400, detail="Invalid filename")
+def _handle(exc: Exception) -> HTTPException:
+    """Translate storage-layer errors into sensible HTTP responses."""
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(status_code=404, detail="File not found")
+    if isinstance(exc, StorageError):
+        return HTTPException(status_code=400, detail=str(exc))
+    return HTTPException(status_code=502, detail=f"Storage backend error: {exc}")
 
-    return candidate
+
+# NOTE: files are namespaced per user by the storage layer, so two users can
+# each own a main.py without clobbering each other. Every handler below passes
+# current_user.username — never a client-supplied username.
+
 
 @router.get("/files")
 async def list_files(current_user: User = Depends(get_current_user)):
-    """List all uploaded files"""
+    """List the current user's files."""
     try:
-        files = []
-        for filename in os.listdir(UPLOAD_DIR):
-            file_path = os.path.join(UPLOAD_DIR, filename)
-            if os.path.isfile(file_path):
-                stat = os.stat(file_path)
-                files.append({
-                    "filename": filename,
-                    "size": stat.st_size,
-                    "last_modified": stat.st_mtime
-                })
-        return {"files": [f["filename"] for f in files]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        files = get_storage().list_files(current_user.username)
+        # Keep the original response shape so the frontend needs no changes.
+        return {"files": [f["filename"] for f in files], "details": files}
+    except Exception as exc:
+        raise _handle(exc) from exc
+
 
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    """Upload a Python file"""
-    if not file.filename.endswith('.py') and file.filename != 'requirements.txt':
+    """Upload a Python file into the current user's folder."""
+    filename = safe_name(file.filename or "")
+    _check_allowed(filename)
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=400,
-            detail="Only Python files (.py) and requirements.txt are allowed"
+            status_code=413,
+            detail=f"File too large (limit {MAX_UPLOAD_BYTES // 1024} KB)",
         )
-    
-    file_path = safe_file_path(file.filename)
-    
+
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        return {"filename": os.path.basename(file_path), "message": "File uploaded successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        get_storage().write_file(current_user.username, filename, content)
+        return {"filename": filename, "message": "File uploaded successfully"}
+    except Exception as exc:
+        raise _handle(exc) from exc
+
 
 @router.get("/view/{filename}")
-async def view_file(
-    filename: str,
-    current_user: User = Depends(get_current_user)
-):
-    """View file content"""
-    file_path = safe_file_path(filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
+async def view_file(filename: str, current_user: User = Depends(get_current_user)):
+    """Return a file's text content for the editor."""
     try:
-        with open(file_path, "r") as f:
-            content = f.read()
-        return {"filename": filename, "content": content}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        content = get_storage().read_file(current_user.username, filename)
+        return {
+            "filename": safe_name(filename),
+            "content": content.decode("utf-8", errors="replace"),
+        }
+    except Exception as exc:
+        raise _handle(exc) from exc
+
 
 @router.put("/edit/{filename}")
 async def edit_file(
     filename: str,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    """Edit/save file content"""
-    file_path = safe_file_path(filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
+    """Save edited content back to storage."""
+    name = safe_name(filename)
+    _check_allowed(name)
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large")
+
+    storage = get_storage()
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        if not storage.file_exists(current_user.username, name):
+            raise HTTPException(status_code=404, detail="File not found")
+        storage.write_file(current_user.username, name, content)
         return {"message": "File saved successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _handle(exc) from exc
+
 
 @router.delete("/files/{filename}")
-async def delete_file(
-    filename: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Delete a file"""
-    file_path = safe_file_path(filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
+async def delete_file(filename: str, current_user: User = Depends(get_current_user)):
+    """Delete one of the current user's files."""
     try:
-        os.remove(file_path)
-        return {"message": f"File {filename} deleted successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        get_storage().delete_file(current_user.username, filename)
+        return {"message": f"File {safe_name(filename)} deleted successfully"}
+    except Exception as exc:
+        raise _handle(exc) from exc
+
 
 @router.get("/download/{filename}")
-async def download_file(
-    filename: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Download a file"""
-    file_path = safe_file_path(filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    return FileResponse(file_path, filename=os.path.basename(file_path))
+async def download_file(filename: str, current_user: User = Depends(get_current_user)):
+    """Download a file. Streams from storage rather than the local disk."""
+    name = safe_name(filename)
+    try:
+        content = get_storage().read_file(current_user.username, name)
+    except Exception as exc:
+        raise _handle(exc) from exc
+
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
 
 @router.post("/create/{filename}")
-async def create_file(
-    filename: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Create a new Python file"""
-    if not filename.endswith('.py'):
+async def create_file(filename: str, current_user: User = Depends(get_current_user)):
+    """Create a new empty Python file."""
+    name = safe_name(filename)
+    if not name.endswith(".py"):
         raise HTTPException(status_code=400, detail="Filename must end with .py")
-    
-    file_path = safe_file_path(filename)
-    if os.path.exists(file_path):
-        raise HTTPException(status_code=400, detail="File already exists")
-    
+
+    storage = get_storage()
     try:
-        with open(file_path, "w") as f:
-            f.write("# Created by NEBULA\n\n")
-        return {"message": f"File {filename} created successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        if storage.file_exists(current_user.username, name):
+            raise HTTPException(status_code=400, detail="File already exists")
+        storage.write_file(current_user.username, name, b"# Created by NEBULA\n\n")
+        return {"message": f"File {name} created successfully"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _handle(exc) from exc
+
 
 @router.put("/rename/{filename}")
 async def rename_file(
     filename: str,
     new_name: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    """Rename a file"""
-    if not new_name.endswith('.py'):
+    """Rename one of the current user's files."""
+    target = safe_name(new_name)
+    if not target.endswith(".py"):
         raise HTTPException(status_code=400, detail="New filename must end with .py")
-    
-    old_path = safe_file_path(filename)
-    new_path = safe_file_path(new_name)
-    
-    if not os.path.exists(old_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    if os.path.exists(new_path):
-        raise HTTPException(status_code=400, detail="File already exists")
-    
+
+    storage = get_storage()
     try:
-        os.rename(old_path, new_path)
-        return {"message": f"File renamed to {new_name}"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        if storage.file_exists(current_user.username, target):
+            raise HTTPException(status_code=400, detail="File already exists")
+        storage.rename_file(current_user.username, filename, target)
+        return {"message": f"File renamed to {target}"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _handle(exc) from exc

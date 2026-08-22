@@ -1,144 +1,136 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from .. import database, auth, models
+
+from .. import database, models
 from ..auth import get_current_user
 from ..models import User
 from ..runner import runner
-from .files import safe_file_path
-import os
-import time
+from ..services.storage import StorageError, get_storage, safe_name, safe_user
 
 router = APIRouter(prefix="/api", tags=["execution"])
 
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
-UPLOAD_DIR = os.path.abspath(UPLOAD_DIR)
-print(f"📁 UPLOAD_DIR: {UPLOAD_DIR}")
+
+def run_key(username: str, filename: str) -> str:
+    """
+    Tracking key for the runner. Namespacing by user means alice's main.py and
+    bob's main.py are separate executions rather than fighting over one slot.
+    """
+    return f"{safe_user(username)}/{safe_name(filename)}"
+
 
 @router.post("/run/{filename}")
 async def run_file(
     filename: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
 ):
-    """Run a Python file"""
-    # Clean the filename and make sure it can't escape UPLOAD_DIR
-    filename = os.path.basename(filename.strip())
-    abs_path = safe_file_path(filename)
-    
-    print(f"🔍 Running file: {filename}")
-    print(f"📁 Full path: {abs_path}")
-    
+    """Fetch the file from storage into a local workspace, then execute it."""
+    name = safe_name(filename)
+    key = run_key(current_user.username, name)
+    storage = get_storage()
+
+    try:
+        if not storage.file_exists(current_user.username, name):
+            raise HTTPException(status_code=404, detail=f"File not found: {name}")
+        # For the FileCloud backend this downloads the user's files to local
+        # disk, because a subprocess can only execute something real.
+        workspace = storage.materialize_dir(current_user.username)
+    except HTTPException:
+        raise
+    except StorageError as exc:
+        raise HTTPException(status_code=502, detail=f"Storage error: {exc}") from exc
+
+    abs_path = os.path.join(workspace, name)
     if not os.path.exists(abs_path):
-        print(f"❌ File not found: {abs_path}")
         raise HTTPException(
-            status_code=404, 
-            detail=f"File not found: {filename}"
+            status_code=502,
+            detail=f"Could not stage '{name}' from storage for execution",
         )
-    
-    # Check if file is empty
     if os.path.getsize(abs_path) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File '{filename}' is empty. Please upload a file with content."
-        )
-    
-    # Check if already running
-    if filename in runner.running_files and runner.running_files[filename]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File '{filename}' is already running"
-        )
-    
-    result = runner.run_file(filename, UPLOAD_DIR)
-    
+        raise HTTPException(status_code=400, detail=f"File '{name}' is empty.")
+
+    if runner.running_files.get(key):
+        raise HTTPException(status_code=400, detail=f"File '{name}' is already running")
+
+    result = runner.run_file(name, workspace, key=key)
+
     if "error" in result:
-        history = models.ExecutionHistory(
-            user_id=current_user.id,
-            filename=filename,
-            status="Error",
-            error=result["error"],
-            return_code=-1
+        db.add(
+            models.ExecutionHistory(
+                user_id=current_user.id,
+                filename=name,
+                status="Error",
+                error=result["error"],
+                return_code=-1,
+            )
         )
-        db.add(history)
         db.commit()
         raise HTTPException(status_code=400, detail=result["error"])
-    
-    # Return the CLEAN filename so the frontend uses the correct key for polling
-    result["filename"] = filename
+
+    # Return the clean filename so the frontend polls with the right key.
+    result["filename"] = name
     return result
 
+
 @router.post("/stop")
-async def stop_file(
-    current_user: User = Depends(get_current_user)
-):
-    """Stop the currently running file"""
-    # Find the running file
-    running_files = [f for f, running in runner.running_files.items() if running]
-    if not running_files:
+async def stop_file(current_user: User = Depends(get_current_user)):
+    """Stop whatever the current user is running (never another user's job)."""
+    prefix = f"{safe_user(current_user.username)}/"
+    mine = runner.running_keys(prefix=prefix)
+    if not mine:
         raise HTTPException(status_code=400, detail="No file is currently running")
-    
-    filename = running_files[0]
-    result = runner.stop_file(filename)
-    
+
+    result = runner.stop_file(mine[0])
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
-    
     return result
+
 
 @router.get("/result/{filename}")
 async def get_result(
     filename: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
 ):
-    """Get the result of a running or completed file"""
-    # Always strip any path prefix (e.g. 'workspace/test.py' -> 'test.py')
-    filename = os.path.basename(filename.strip())
-    print(f"Getting result for: {filename}")
-    print(f"Running processes: {list(runner.processes.keys())}")
-    print(f"Stored results: {list(runner.results.keys())}")
+    """Poll for the result of the current user's execution."""
+    name = safe_name(filename)
+    key = run_key(current_user.username, name)
 
-    # Check both active processes AND stored results
-    if filename not in runner.processes and filename not in runner.results:
+    if key not in runner.processes and key not in runner.results:
         raise HTTPException(
-            status_code=404,
-            detail=f"File '{filename}' not found or not running"
+            status_code=404, detail=f"File '{name}' not found or not running"
         )
 
-    result = runner.get_result(filename)
+    result = runner.get_result(key)
 
-    # ✅ FIX: Only save history ONCE using a flag — prevents duplicate DB writes on every poll
+    # Save history exactly once, not on every poll.
     if result.get("finished") and not result.get("history_saved"):
-        print(f"✅ File finished! Status: {result.get('status')} — saving history")
-        history = models.ExecutionHistory(
-            user_id=current_user.id,
-            filename=filename,
-            status=result.get("status", "Finished"),
-            output=result.get("output", ""),
-            error=result.get("error", ""),
-            return_code=result.get("return_code", 0),
-            execution_time=result.get("execution_time", 0),
-            memory_usage=result.get("memory_usage", 0)
+        db.add(
+            models.ExecutionHistory(
+                user_id=current_user.id,
+                filename=name,
+                status=result.get("status", "Finished"),
+                output=result.get("output", ""),
+                error=result.get("error", ""),
+                return_code=result.get("return_code", 0),
+                execution_time=result.get("execution_time", 0),
+                memory_usage=result.get("memory_usage", 0),
+            )
         )
-        db.add(history)
         db.commit()
-        # Mark so we don't double-save on the next poll
         result["history_saved"] = True
-        print(f"✅ History saved for: {filename}")
-    elif result.get("finished"):
-        print(f"⏭️ History already saved for: {filename}, skipping")
-    else:
-        print(f"⏳ File still running...")
 
-    # Strip internal tracking flag before returning to frontend
-    response = {k: v for k, v in result.items() if k != "history_saved"}
-    return response
+    return {k: v for k, v in result.items() if k != "history_saved"}
+
 
 @router.get("/debug/runner")
 async def debug_runner(current_user: User = Depends(get_current_user)):
-    """Debug endpoint to see runner state"""
+    """Runner state for the current user only."""
+    prefix = f"{safe_user(current_user.username)}/"
     return {
-        "processes": list(runner.processes.keys()),
-        "running_files": runner.running_files,
-        "start_times": runner.start_times
+        "processes": [k for k in runner.processes if k.startswith(prefix)],
+        "running": runner.running_keys(prefix=prefix),
+        "storage_backend": get_storage().name,
     }
